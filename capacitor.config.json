@@ -1,0 +1,9 @@
+{
+  "appId": "com.blackoutscreen.app",
+  "appName": "Blackout Screen",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "allowMixedContent": true
+  }
+}

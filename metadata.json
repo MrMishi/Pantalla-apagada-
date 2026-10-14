@@ -1,0 +1,6 @@
+{
+  "name": "Blackout Screen - Pantalla Negra & Botón Flotante",
+  "description": "Aplicación Android y simulador interactivo para oscurecer la pantalla con brillo mínimo y capa negra transparente, manteniendo interacción continua y botón flotante.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
