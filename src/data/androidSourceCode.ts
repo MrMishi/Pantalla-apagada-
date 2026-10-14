@@ -583,11 +583,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          cache: 'npm'
 
       - name: Install dependencies
         run: |
-          npm ci || npm install
+          npm install --legacy-peer-deps
 
       - name: Build web application
         run: |
@@ -596,9 +595,9 @@ jobs:
       - name: Setup & Sync Capacitor Android
         run: |
           if [ ! -d "android" ]; then
-            npx cap add android
+            npx --yes @capacitor/cli add android
           fi
-          npx cap sync android
+          npx --yes @capacitor/cli sync android
 
       - name: Accept Android SDK licenses
         run: |
