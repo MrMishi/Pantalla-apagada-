@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BlackoutConfig } from '../types';
 import { audioController } from '../utils/audio';
-import { Sparkles, SunDim, X } from 'lucide-react';
+import { Sparkles, X, SunDim } from 'lucide-react';
 
 interface BlackoutOverlayProps {
   isActive: boolean;
   config: BlackoutConfig;
   onDeactivate: () => void;
-  isFullscreen: boolean;
 }
 
 interface TouchRipple {
@@ -20,7 +19,6 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
   isActive,
   config,
   onDeactivate,
-  isFullscreen,
 }) => {
   const [clickCount, setClickCount] = useState(0);
   const [hintVisible, setHintVisible] = useState(false);
@@ -46,7 +44,32 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
     return () => clearInterval(interval);
   }, []);
 
-  // Listen to keyboard Escape to deactivate safely
+  // Request fullscreen and prevent screen sleep when blackout is active
+  useEffect(() => {
+    if (isActive) {
+      // Try entering fullscreen on the real device to hide system UI/notches
+      try {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        } else if ((document.documentElement as unknown as { webkitRequestFullscreen?: () => Promise<void> }).webkitRequestFullscreen) {
+          (document.documentElement as unknown as { webkitRequestFullscreen: () => Promise<void> }).webkitRequestFullscreen().catch(() => {});
+        }
+      } catch {
+        // Ignore
+      }
+    } else {
+      // Exit fullscreen when deactivated
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
+      } catch {
+        // Ignore
+      }
+    }
+  }, [isActive]);
+
+  // Keyboard Escape listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isActive) {
@@ -74,7 +97,7 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
     setRipples((prev) => [...prev.slice(-4), newRipple]);
     setTimeout(() => {
       setRipples((prev) => prev.filter((r) => r.id !== newRipple.id));
-    }, 700);
+    }, 600);
   };
 
   const showTemporaryHint = () => {
@@ -84,11 +107,10 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
     }, 1400);
   };
 
-  // Pointer / Tap Event handler
+  // Pointer / Tap Event handler on the real phone screen
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = e.clientX;
+    const y = e.clientY;
 
     addRipple(x, y);
 
@@ -96,7 +118,7 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
       audioController.playClickSound(260, 0.03);
     }
     if (config.vibrationFeedback) {
-      audioController.triggerHaptic(20);
+      audioController.triggerHaptic(25);
     }
 
     touchStartRef.current = { y: e.clientY, time: Date.now() };
@@ -129,9 +151,9 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
         if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
         clickTimeoutRef.current = window.setTimeout(() => {
           setClickCount(0);
-        }, 400);
+        }, 450);
       } else if (clickCount === 1) {
-        // Second tap registered!
+        // Double tap confirmed!
         if (clickTimeoutRef.current) clearTimeout(clickTimeoutRef.current);
         setClickCount(0);
         handleUnlockSuccess();
@@ -181,7 +203,7 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
   const getGestureLabel = () => {
     switch (config.unlockGesture) {
       case 'double_tap':
-        return clickCount === 1 ? '¡Toca una vez más para salir!' : 'Toca 2 veces para reactivar pantalla';
+        return clickCount === 1 ? '¡Toca una vez más para salir!' : 'Toca 2 veces para reactivar tu pantalla';
       case 'triple_tap':
         return `Toca ${3 - clickCount} vez más para salir`;
       case 'single_tap':
@@ -202,15 +224,13 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
         backgroundColor: '#000000',
         opacity: config.opacity,
       }}
-      className={`absolute inset-0 z-50 flex flex-col items-center justify-between p-6 select-none cursor-pointer transition-opacity duration-300 overflow-hidden ${
-        isFullscreen ? 'fixed' : ''
-      }`}
+      className="fixed inset-0 w-screen h-screen z-[999999] flex flex-col items-center justify-between p-6 select-none cursor-pointer transition-opacity duration-200 overflow-hidden"
     >
       {/* Dim Light Filter / Hardware Brightness Simulation */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          boxShadow: `inset 0 0 100px rgba(0,0,0, ${1 - config.brightnessLevel})`,
+          boxShadow: `inset 0 0 120px rgba(0,0,0, ${1 - config.brightnessLevel})`,
         }}
       />
 
@@ -222,27 +242,27 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
             left: `${ripple.x}px`,
             top: `${ripple.y}px`,
           }}
-          className="absolute -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full bg-white/10 pointer-events-none animate-ping duration-500"
+          className="absolute -translate-x-1/2 -translate-y-1/2 w-16 h-16 rounded-full bg-white/10 pointer-events-none animate-ping duration-500"
         />
       ))}
 
-      {/* Top bar / Emergency deactivation (Very faint) */}
-      <div className="w-full flex items-center justify-between text-[11px] text-neutral-600/50 pt-2 z-10 pointer-events-none">
-        <div className="flex items-center gap-1.5 opacity-40">
+      {/* Top emergency discreet escape */}
+      <div className="w-full flex items-center justify-between text-[11px] text-neutral-600/40 pt-2 z-10 pointer-events-none">
+        <div className="flex items-center gap-1.5 opacity-30">
           <SunDim className="w-3.5 h-3.5" />
           <span>Brillo: {(config.brightnessLevel * 100).toFixed(0)}% (0.001f)</span>
         </div>
 
-        {/* Discreet Emergency Exit button (clickable) */}
+        {/* Discreet exit button */}
         <button
           onClick={(e) => {
             e.stopPropagation();
             handleUnlockSuccess();
           }}
           title="Salir del modo pantalla negra"
-          className="pointer-events-auto p-1.5 rounded-full text-neutral-600 hover:text-white hover:bg-neutral-800/60 transition-colors"
+          className="pointer-events-auto p-2 rounded-full text-neutral-600 hover:text-white hover:bg-neutral-800/80 transition-colors"
         >
-          <X className="w-4 h-4" />
+          <X className="w-5 h-5" />
         </button>
       </div>
 
@@ -251,10 +271,10 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
         {/* Optional Ambient Always-On Clock (Faint OLED look) */}
         {config.showAodClock && (
           <div className="flex flex-col items-center mb-8 opacity-25">
-            <span className="text-5xl font-light tracking-tighter text-neutral-200 font-mono">
+            <span className="text-6xl font-light tracking-tighter text-neutral-200 font-mono">
               {currentTime}
             </span>
-            <span className="text-xs text-neutral-400 mt-1 uppercase tracking-widest">
+            <span className="text-[11px] text-neutral-400 mt-1 uppercase tracking-widest">
               Modo Stealth OLED Activo
             </span>
           </div>
@@ -262,35 +282,35 @@ export const BlackoutOverlay: React.FC<BlackoutOverlayProps> = ({
 
         {/* Transient subtle hint that triggers only on interaction */}
         <div
-          className={`transition-all duration-300 flex flex-col items-center gap-2 ${
-            hintVisible ? 'opacity-80 scale-100' : 'opacity-0 scale-95'
+          className={`transition-all duration-200 flex flex-col items-center gap-2 ${
+            hintVisible ? 'opacity-90 scale-100' : 'opacity-0 scale-95'
           }`}
         >
-          <div className="px-4 py-2 rounded-full bg-neutral-900/90 border border-neutral-700/60 backdrop-blur-md shadow-2xl flex items-center gap-2">
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+          <div className="px-5 py-2.5 rounded-full bg-neutral-900/90 border border-neutral-700/80 backdrop-blur-md shadow-2xl flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
             <span className="text-xs text-neutral-200 font-medium">
               {getGestureLabel()}
             </span>
           </div>
         </div>
 
-        {/* Long press circular progress indicator if applicable */}
+        {/* Long press circular progress */}
         {config.unlockGesture === 'long_press' && longPressProgress > 0 && (
           <div className="mt-4 w-12 h-12 rounded-full border-2 border-neutral-700 flex items-center justify-center">
             <div
-              className="rounded-full bg-emerald-400/40"
+              className="rounded-full bg-emerald-400/50"
               style={{ width: `${longPressProgress}%`, height: `${longPressProgress}%` }}
             />
           </div>
         )}
       </div>
 
-      {/* Bottom hint notice (Very discreet) */}
-      <div className="w-full text-center pb-2 z-10 pointer-events-none">
-        <p className="text-[10px] text-neutral-700/60 font-mono">
-          {config.unlockGesture === 'double_tap' && 'Doble toque para desbloquear'}
-          {config.unlockGesture === 'single_tap' && 'Toca para desbloquear'}
-          {config.unlockGesture === 'triple_tap' && 'Triple toque para desbloquear'}
+      {/* Bottom hint notice */}
+      <div className="w-full text-center pb-4 z-10 pointer-events-none">
+        <p className="text-[11px] text-neutral-700/70 font-mono">
+          {config.unlockGesture === 'double_tap' && 'Doble toque en cualquier lugar para salir'}
+          {config.unlockGesture === 'single_tap' && 'Toca para reactivar'}
+          {config.unlockGesture === 'triple_tap' && 'Triple toque para salir'}
           {config.unlockGesture === 'long_press' && 'Mantén presionado para reactivar'}
           {config.unlockGesture === 'swipe_up' && 'Desliza hacia arriba para salir'}
         </p>
