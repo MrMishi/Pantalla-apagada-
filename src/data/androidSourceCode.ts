@@ -599,6 +599,44 @@ jobs:
           fi
           npx --yes @capacitor/cli sync android
 
+      - name: Configure Fullscreen & Hide Status Bar
+        run: |
+          cat << 'EOF' > android/app/src/main/java/com/blackoutscreen/app/MainActivity.java
+          package com.blackoutscreen.app;
+
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.View;
+          import android.view.WindowInsets;
+          import android.view.WindowInsetsController;
+          import android.view.WindowManager;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                      getWindow().getAttributes().layoutInDisplayCutoutMode =
+                          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                  }
+
+                  getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                      getWindow().setDecorFitsSystemWindows(false);
+                      WindowInsetsController controller = getWindow().getInsetsController();
+                      if (controller != null) {
+                          controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+                          controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                      }
+                  }
+              }
+          }
+          EOF
+
       - name: Accept Android SDK licenses
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
@@ -621,7 +659,7 @@ jobs:
     name: 'capacitor.config.json',
     path: 'capacitor.config.json',
     language: 'json',
-    description: 'Configuración de Capacitor para empaquetar la app web como aplicación nativa de Android.',
+    description: 'Configuración de Capacitor con soporte para ocultar la barra de estado y modo inmersivo.',
     content: `{
   "appId": "com.blackoutscreen.app",
   "appName": "Blackout Screen",
@@ -629,6 +667,13 @@ jobs:
   "server": {
     "androidScheme": "https",
     "allowMixedContent": true
+  },
+  "plugins": {
+    "StatusBar": {
+      "overlaysWebView": true,
+      "style": "DARK",
+      "backgroundColor": "#000000"
+    }
   }
 }
 `,
