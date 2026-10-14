@@ -6,6 +6,7 @@ import { AndroidCodeViewer } from './components/AndroidCodeViewer';
 import { GuideSection } from './components/GuideSection';
 import { audioController } from './utils/audio';
 import { wakeLockManager } from './utils/wakeLock';
+import { nativeOverlayService } from './utils/nativeOverlay';
 import {
   Moon,
   Power,
@@ -25,17 +26,23 @@ import {
   Smartphone,
   CheckCircle2,
   Radio,
-  Sliders,
+  ExternalLink,
+  Sparkles,
 } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'device' | 'code' | 'guide'>('device');
   const [isBlackoutActive, setIsBlackoutActive] = useState(false);
-  const [showFloatingBubble, setShowFloatingBubble] = useState(true);
+  const [showWebBubble, setShowWebBubble] = useState(true);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
+  // Native Floating Service state
+  const [isNativeServiceRunning, setIsNativeServiceRunning] = useState(false);
+  const [nativePermissionGranted, setNativePermissionGranted] = useState(false);
+  const [serviceMessage, setServiceMessage] = useState<string | null>(null);
+
   const [config, setConfig] = useState<BlackoutConfig>({
-    opacity: 1.0, // 100% pure black for real device
+    opacity: 1.0,
     brightnessLevel: 0.01,
     unlockGesture: 'double_tap',
     showAodClock: false,
@@ -46,7 +53,16 @@ export default function App() {
     keepScreenOn: true,
   });
 
-  // Keep phone screen awake when blackout is active
+  // Check native permission on load
+  useEffect(() => {
+    const checkNative = async () => {
+      const granted = await nativeOverlayService.checkPermission();
+      setNativePermissionGranted(granted);
+    };
+    checkNative();
+  }, []);
+
+  // Screen WakeLock when blackout is active
   useEffect(() => {
     if (isBlackoutActive && config.keepScreenOn) {
       wakeLockManager.request();
@@ -54,6 +70,40 @@ export default function App() {
       wakeLockManager.release();
     }
   }, [isBlackoutActive, config.keepScreenOn]);
+
+  const handleStartNativeFloatingService = async () => {
+    const granted = await nativeOverlayService.checkPermission();
+    if (!granted) {
+      setServiceMessage('Solicitando permiso "Aparecer encima de otras apps"...');
+      await nativeOverlayService.requestPermission();
+      setTimeout(async () => {
+        const recheck = await nativeOverlayService.checkPermission();
+        setNativePermissionGranted(recheck);
+        if (recheck) {
+          await nativeOverlayService.startService();
+          setIsNativeServiceRunning(true);
+          setServiceMessage('¡Burbuja activada! Ya puedes abrir YouTube Music.');
+        }
+      }, 1500);
+      return;
+    }
+
+    const ok = await nativeOverlayService.startService();
+    if (ok) {
+      setIsNativeServiceRunning(true);
+      setServiceMessage('¡Burbuja activada sobre otras apps! Ahora abre YouTube Music.');
+    } else {
+      // If running on web preview or fallback, use web floating bubble
+      setShowWebBubble(true);
+      setServiceMessage('Burbuja flotante activa en pantalla.');
+    }
+  };
+
+  const handleStopNativeFloatingService = async () => {
+    await nativeOverlayService.stopService();
+    setIsNativeServiceRunning(false);
+    setServiceMessage('Burbuja flotante detenida.');
+  };
 
   const handleActivateBlackout = () => {
     if (config.soundFeedback) {
@@ -117,7 +167,7 @@ export default function App() {
                 <span>Blackout Screen</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               </h1>
-              <p className="text-[10px] text-neutral-400">Pantalla Negra de tu Teléfono</p>
+              <p className="text-[10px] text-neutral-400">Modo Pantalla Negra & YouTube</p>
             </div>
           </div>
 
@@ -166,22 +216,75 @@ export default function App() {
       <main className="max-w-2xl mx-auto px-4 pt-5 space-y-5">
         {activeTab === 'device' && (
           <>
-            {/* HERO CARD: Direct Button to Turn Phone Screen Black */}
-            <div className="p-6 rounded-3xl bg-gradient-to-b from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-800 shadow-2xl relative overflow-hidden text-center">
-              <div className="absolute -top-12 -left-12 w-40 h-40 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-              <div className="absolute -bottom-12 -right-12 w-40 h-40 bg-teal-500/10 rounded-full blur-3xl pointer-events-none" />
+            {/* SPECIAL CARD: FLOATING BUBBLE OVER YOUTUBE MUSIC */}
+            <div className="p-6 rounded-3xl bg-gradient-to-b from-indigo-950/40 via-neutral-900 to-neutral-950 border border-indigo-500/30 shadow-2xl relative overflow-hidden">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="p-2 rounded-xl bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  <Radio className="w-5 h-5 animate-pulse" />
+                </span>
+                <div>
+                  <h2 className="text-base font-extrabold text-white flex items-center gap-2">
+                    <span>Botón Flotante sobre YouTube Music</span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full font-mono">
+                      OVERLAY NATIVO
+                    </span>
+                  </h2>
+                  <p className="text-xs text-neutral-400">
+                    Aparece sobre YouTube o cualquier app sin cerrarla.
+                  </p>
+                </div>
+              </div>
 
+              <div className="p-3.5 my-3 rounded-2xl bg-neutral-950/80 border border-neutral-800 text-xs text-neutral-300 space-y-2">
+                <p>
+                  🎵 <strong>Para escuchar YouTube Music con la pantalla oscura:</strong>
+                </p>
+                <ol className="list-decimal list-inside space-y-1 text-neutral-400 text-[11px]">
+                  <li>Presiona <strong>"Activar Burbuja sobre YouTube"</strong> abajo.</li>
+                  <li>Abre <strong>YouTube Music</strong> y dale Play a tus canciones.</li>
+                  <li>Toca la burbuja flotante que estará en tu pantalla: <strong>toda la pantalla se apagará (#000000)</strong> sin pausar la música.</li>
+                  <li>Para reactivar la pantalla, haz <strong>doble toque</strong> en el cristal.</li>
+                </ol>
+              </div>
+
+              {serviceMessage && (
+                <div className="p-3 mb-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                  <span>{serviceMessage}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <button
+                  onClick={handleStartNativeFloatingService}
+                  className="py-3.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-neutral-950 font-black text-xs uppercase tracking-wide flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition-all"
+                >
+                  <Radio className="w-4 h-4" />
+                  <span>{isNativeServiceRunning ? 'Burbuja Flotando Activa' : 'Activar Burbuja sobre YouTube'}</span>
+                </button>
+
+                <button
+                  onClick={handleStopNativeFloatingService}
+                  className="py-3.5 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 font-bold text-xs uppercase tracking-wide flex items-center justify-center gap-2 border border-neutral-700 active:scale-95 transition-all"
+                >
+                  <Power className="w-4 h-4 text-rose-400" />
+                  <span>Detener Burbuja Flotante</span>
+                </button>
+              </div>
+            </div>
+
+            {/* DIRECT ACTION: BLACKOUT SCREEN NOW */}
+            <div className="p-6 rounded-3xl bg-gradient-to-b from-neutral-900 via-neutral-900 to-neutral-950 border border-neutral-800 shadow-2xl relative overflow-hidden text-center">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold mb-3">
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Aplicación Activa en tu Dispositivo</span>
+                <span>Prueba Inmediata en este Dispositivo</span>
               </span>
 
               <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight mb-2">
-                Poner Pantalla en Negro
+                Oscurecer Pantalla Ahora
               </h2>
-              <p className="text-xs text-neutral-400 max-w-md mx-auto mb-6">
-                Oscurece el 100% de la pantalla de tu teléfono con brillo mínimo y negro OLED. Para reactivarla, haz{' '}
-                <strong className="text-emerald-300">doble toque</strong> en el cristal.
+              <p className="text-xs text-neutral-400 max-w-md mx-auto mb-5">
+                Pon a oscuras la pantalla ahora mismo. Se ocultan notificaciones, batería y wifi. Doble toque para reactivar.
               </p>
 
               {/* GIANT PRIMARY ACTION BUTTON */}
@@ -190,78 +293,20 @@ export default function App() {
                 className="w-full max-w-sm mx-auto py-5 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 via-emerald-400 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-neutral-950 font-black text-base tracking-wide flex items-center justify-center gap-3 shadow-[0_10px_35px_rgba(16,185,129,0.35)] active:scale-[0.98] transition-all"
               >
                 <Power className="w-6 h-6 stroke-[2.5]" />
-                <span>OSCURECER PANTALLA AHORA</span>
+                <span>PROBAR PANTALLA NEGRA AQUÍ</span>
               </button>
 
               <div className="flex items-center justify-center gap-4 text-[11px] text-neutral-500 mt-4">
                 <span className="flex items-center gap-1">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                  No suspende apps ni CPU
+                  No suspende apps
                 </span>
                 <span>•</span>
                 <span className="flex items-center gap-1">
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
-                  Ahorra ~90% de batería
+                  Ahorro OLED ~90%
                 </span>
               </div>
-            </div>
-
-            {/* FLOATING ACTION BUBBLE TOGGLE & CONFIGURATION */}
-            <div className="p-5 rounded-2xl bg-neutral-900/90 border border-neutral-800 shadow-xl space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <span className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                    <Radio className="w-5 h-5" />
-                  </span>
-                  <div>
-                    <h3 className="text-sm font-bold text-white">Botón Suspensivo Flotante</h3>
-                    <p className="text-[11px] text-neutral-400">
-                      Burbuja redonda en pantalla (como el grabador de pantalla).
-                    </p>
-                  </div>
-                </div>
-
-                {/* Enable / Disable Floating Bubble */}
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showFloatingBubble}
-                    onChange={(e) => setShowFloatingBubble(e.target.checked)}
-                    className="sr-only peer"
-                  />
-                  <div className="w-11 h-6 bg-neutral-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500" />
-                </label>
-              </div>
-
-              {showFloatingBubble && (
-                <div className="p-3.5 rounded-xl bg-neutral-950/70 border border-neutral-800 text-xs space-y-3">
-                  <p className="text-neutral-300 text-[11px]">
-                    📍 <strong>La burbuja está activa en tu pantalla:</strong> Puedes arrastrarla con el dedo a cualquier lado. Al tocarla, la pantalla de tu celular se pondrá en negro instantáneamente.
-                  </p>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-neutral-800/80">
-                    <span className="text-[11px] text-neutral-400 font-medium">Icono de la burbuja:</span>
-                    <div className="flex items-center gap-1.5">
-                      {(['moon', 'power', 'shield', 'eye'] as const).map((icon) => (
-                        <button
-                          key={icon}
-                          onClick={() => setConfig((prev) => ({ ...prev, bubbleIcon: icon }))}
-                          className={`p-1.5 rounded-lg border text-xs capitalize ${
-                            config.bubbleIcon === icon
-                              ? 'bg-neutral-800 border-emerald-500 text-emerald-400'
-                              : 'bg-neutral-900 border-neutral-800 text-neutral-400'
-                          }`}
-                        >
-                          {icon === 'moon' && <Moon className="w-4 h-4" />}
-                          {icon === 'power' && <Power className="w-4 h-4" />}
-                          {icon === 'shield' && <ShieldCheck className="w-4 h-4" />}
-                          {icon === 'eye' && <Zap className="w-4 h-4" />}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             {/* UNLOCK GESTURE SELECTOR */}
@@ -271,9 +316,9 @@ export default function App() {
                   <HandMetal className="w-5 h-5" />
                 </span>
                 <div>
-                  <h3 className="text-sm font-bold text-white">¿Cómo quitar la pantalla negra?</h3>
+                  <h3 className="text-sm font-bold text-white">¿Cómo reactivar la pantalla negra?</h3>
                   <p className="text-[11px] text-neutral-400">
-                    Gesto para desactivar la capa oscura y volver a ver tu teléfono.
+                    Gesto configurado para salir del modo oscuro.
                   </p>
                 </div>
               </div>
@@ -318,7 +363,7 @@ export default function App() {
                   <div>
                     <h3 className="text-sm font-bold text-white">Prueba de Audio en Segundo Plano</h3>
                     <p className="text-[11px] text-neutral-400">
-                      Verifica que el sonido sigue sonando con la pantalla en negro.
+                      Simula la reproducción continua de YouTube Music.
                     </p>
                   </div>
                 </div>
@@ -349,29 +394,26 @@ export default function App() {
                 <Volume2 className={`w-4 h-4 shrink-0 ${isPlayingAudio ? 'text-emerald-400 animate-pulse' : 'text-neutral-500'}`} />
                 <span>
                   {isPlayingAudio
-                    ? '🔊 Audio sonando. Toca "Oscurecer Pantalla Ahora" para comprobar que continúa sin cortes.'
-                    : 'Presiona "Reproducir" para escuchar el audio de prueba y luego apaga la pantalla.'}
+                    ? '🔊 Música sonando. Activa la pantalla negra para comprobar que el audio continúa sin pausas.'
+                    : 'Dale reproducir para probar audio continuo sin interrupción de pantalla.'}
                 </span>
               </div>
             </div>
 
-            {/* QUICK PREFERENCES (OLED, VIBRATION, AOD) */}
+            {/* QUICK PREFERENCES */}
             <div className="p-5 rounded-2xl bg-neutral-900/90 border border-neutral-800 shadow-xl space-y-4">
               <h3 className="text-xs font-bold text-neutral-300 uppercase tracking-wider">
                 Ajustes Visuales & Hápticos
               </h3>
 
               <div className="space-y-3 text-xs">
-                {/* Opacity */}
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="flex items-center gap-1.5 text-neutral-200 font-medium">
                       <Layers className="w-3.5 h-3.5 text-blue-400" />
                       Opacidad de la capa negra
                     </span>
-                    <span className="font-mono text-emerald-400 font-bold">
-                      {(config.opacity * 100).toFixed(0)}% (OLED Puro)
-                    </span>
+                    <span className="font-mono text-emerald-400 font-bold">100% (Negro OLED Absoluto)</span>
                   </div>
                   <input
                     type="range"
@@ -384,27 +426,6 @@ export default function App() {
                   />
                 </div>
 
-                {/* Simulated Brightness */}
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="flex items-center gap-1.5 text-neutral-200 font-medium">
-                      <Sun className="w-3.5 h-3.5 text-amber-400" />
-                      Brillo mínimo de pantalla (screenBrightness)
-                    </span>
-                    <span className="font-mono text-amber-300 font-bold">0.001f (Mínimo hardware)</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.01"
-                    max="0.15"
-                    step="0.01"
-                    value={config.brightnessLevel}
-                    onChange={(e) => setConfig((prev) => ({ ...prev, brightnessLevel: parseFloat(e.target.value) }))}
-                    className="w-full accent-amber-400 h-1.5 bg-neutral-800 rounded-lg cursor-pointer"
-                  />
-                </div>
-
-                {/* Toggles */}
                 <div className="pt-2 border-t border-neutral-800 space-y-2">
                   <label className="flex items-center justify-between p-2.5 rounded-xl bg-neutral-950/40 border border-neutral-800/80 cursor-pointer">
                     <div className="flex items-center gap-2">
@@ -452,15 +473,15 @@ export default function App() {
         )}
       </main>
 
-      {/* THE FLOATING BUBBLE (Floats on your actual phone screen!) */}
+      {/* WEB FLOATING BUBBLE (Preview / in-app) */}
       <FloatingBubble
         config={config}
         onActivate={handleActivateBlackout}
         isBlackoutActive={isBlackoutActive}
-        visible={showFloatingBubble}
+        visible={showWebBubble}
       />
 
-      {/* THE BLACKOUT OVERLAY (Turns 100% of your real phone screen pitch black!) */}
+      {/* BLACKOUT OVERLAY */}
       <BlackoutOverlay
         isActive={isBlackoutActive}
         config={config}

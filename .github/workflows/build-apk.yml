@@ -41,9 +41,330 @@ jobs:
           fi
           npx --yes @capacitor/cli sync android
 
-      - name: Configure Fullscreen & Hide Status Bar
+      - name: Inject Native Blackout Overlay Service & Plugin
         run: |
-          # 1. Update MainActivity to hide status bar, enable immersive fullscreen, and keep screen on
+          # 1. Write BlackoutFloatingService.java
+          cat << 'EOF' > android/app/src/main/java/com/blackoutscreen/app/BlackoutFloatingService.java
+          package com.blackoutscreen.app;
+
+          import android.annotation.SuppressLint;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.graphics.Color;
+          import android.graphics.PixelFormat;
+          import android.graphics.drawable.GradientDrawable;
+          import android.os.Build;
+          import android.os.IBinder;
+          import android.os.VibrationEffect;
+          import android.os.Vibrator;
+          import android.view.GestureDetector;
+          import android.view.Gravity;
+          import android.view.MotionEvent;
+          import android.view.View;
+          import android.view.WindowManager;
+          import android.widget.FrameLayout;
+          import android.widget.ImageView;
+          import android.widget.TextView;
+          import androidx.core.app.NotificationCompat;
+
+          public class BlackoutFloatingService extends Service {
+              private WindowManager windowManager;
+              private FrameLayout floatingBubbleView;
+              private FrameLayout blackoutOverlayView;
+              private WindowManager.LayoutParams bubbleParams;
+              private boolean isBlackoutActive = false;
+
+              private int initialX, initialY;
+              private float initialTouchX, initialTouchY;
+              private boolean isDragging = false;
+
+              private static final String CHANNEL_ID = "blackout_overlay_channel";
+              private static final int NOTIF_ID = 2001;
+
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
+              }
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  startForegroundNotification();
+                  windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+                  createFloatingBubble();
+              }
+
+              private void startForegroundNotification() {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      NotificationChannel channel = new NotificationChannel(
+                          CHANNEL_ID,
+                          "Botón Flotante Pantalla Negra",
+                          NotificationManager.IMPORTANCE_LOW
+                      );
+                      NotificationManager manager = getSystemService(NotificationManager.class);
+                      if (manager != null) manager.createNotificationChannel(channel);
+                  }
+
+                  Intent intent = new Intent(this, MainActivity.class);
+                  PendingIntent pendingIntent = PendingIntent.getActivity(
+                      this, 0, intent,
+                      PendingIntent.FLAG_IMMUTABLE
+                  );
+
+                  Notification notif = new NotificationCompat.Builder(this, CHANNEL_ID)
+                      .setContentTitle("Blackout Screen Activo")
+                      .setContentText("Toca la burbuja flotante para oscurecer la pantalla sobre YouTube")
+                      .setSmallIcon(android.R.drawable.ic_lock_power_off)
+                      .setContentIntent(pendingIntent)
+                      .setOngoing(true)
+                      .build();
+
+                  startForeground(NOTIF_ID, notif);
+              }
+
+              @SuppressLint("ClickableViewAccessibility")
+              private void createFloatingBubble() {
+                  int sizePx = (int) (58 * getResources().getDisplayMetrics().density);
+
+                  floatingBubbleView = new FrameLayout(this);
+                  GradientDrawable bg = new GradientDrawable();
+                  bg.setShape(GradientDrawable.OVAL);
+                  bg.setColor(Color.parseColor("#171717"));
+                  bg.setStroke((int) (2.5f * getResources().getDisplayMetrics().density), Color.parseColor("#10B981"));
+                  floatingBubbleView.setBackground(bg);
+                  floatingBubbleView.setElevation(20f);
+
+                  ImageView icon = new ImageView(this);
+                  icon.setImageResource(android.R.drawable.ic_lock_power_off);
+                  icon.setColorFilter(Color.parseColor("#34D399"));
+                  FrameLayout.LayoutParams iconParams = new FrameLayout.LayoutParams(
+                      (int) (28 * getResources().getDisplayMetrics().density),
+                      (int) (28 * getResources().getDisplayMetrics().density)
+                  );
+                  iconParams.gravity = Gravity.CENTER;
+                  floatingBubbleView.addView(icon, iconParams);
+
+                  int layoutType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                      ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      : WindowManager.LayoutParams.TYPE_PHONE;
+
+                  bubbleParams = new WindowManager.LayoutParams(
+                      sizePx, sizePx,
+                      layoutType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                      PixelFormat.TRANSLUCENT
+                  );
+                  bubbleParams.gravity = Gravity.TOP | Gravity.START;
+                  bubbleParams.x = 30;
+                  bubbleParams.y = 250;
+
+                  floatingBubbleView.setOnTouchListener(new View.OnTouchListener() {
+                      @Override
+                      public boolean onTouch(View v, MotionEvent event) {
+                          switch (event.getAction()) {
+                              case MotionEvent.ACTION_DOWN:
+                                  initialX = bubbleParams.x;
+                                  initialY = bubbleParams.y;
+                                  initialTouchX = event.getRawX();
+                                  initialTouchY = event.getRawY();
+                                  isDragging = false;
+                                  return true;
+                              case MotionEvent.ACTION_MOVE:
+                                  int deltaX = (int) (event.getRawX() - initialTouchX);
+                                  int deltaY = (int) (event.getRawY() - initialTouchY);
+                                  if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) {
+                                      isDragging = true;
+                                      bubbleParams.x = initialX + deltaX;
+                                      bubbleParams.y = initialY + deltaY;
+                                      windowManager.updateViewLayout(floatingBubbleView, bubbleParams);
+                                  }
+                                  return true;
+                              case MotionEvent.ACTION_UP:
+                                  if (!isDragging) {
+                                      showBlackoutOverlay();
+                                  }
+                                  return true;
+                          }
+                          return false;
+                      }
+                  });
+
+                  windowManager.addView(floatingBubbleView, bubbleParams);
+              }
+
+              @SuppressLint("ClickableViewAccessibility")
+              private void showBlackoutOverlay() {
+                  if (isBlackoutActive) return;
+                  isBlackoutActive = true;
+
+                  blackoutOverlayView = new FrameLayout(this);
+                  blackoutOverlayView.setBackgroundColor(Color.BLACK);
+                  blackoutOverlayView.setKeepScreenOn(true);
+
+                  final TextView hintText = new TextView(this);
+                  hintText.setText("Doble toque para reactivar pantalla");
+                  hintText.setTextColor(Color.parseColor("#4B5563"));
+                  hintText.setTextSize(13);
+                  hintText.setAlpha(0f);
+                  FrameLayout.LayoutParams textParams = new FrameLayout.LayoutParams(
+                      FrameLayout.LayoutParams.WRAP_CONTENT,
+                      FrameLayout.LayoutParams.WRAP_CONTENT
+                  );
+                  textParams.gravity = Gravity.CENTER;
+                  blackoutOverlayView.addView(hintText, textParams);
+
+                  int layoutType = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                      ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                      : WindowManager.LayoutParams.TYPE_PHONE;
+
+                  WindowManager.LayoutParams overlayParams = new WindowManager.LayoutParams(
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      WindowManager.LayoutParams.MATCH_PARENT,
+                      layoutType,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                      | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                      | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                      | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                      | WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                      PixelFormat.TRANSLUCENT
+                  );
+                  overlayParams.screenBrightness = 0.001f;
+
+                  final GestureDetector gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+                      @Override
+                      public boolean onDoubleTap(MotionEvent e) {
+                          triggerVibrate();
+                          hideBlackoutOverlay();
+                          return true;
+                      }
+                      @Override
+                      public boolean onSingleTapConfirmed(MotionEvent e) {
+                          hintText.setAlpha(0.6f);
+                          hintText.postDelayed(new Runnable() {
+                              @Override
+                              public void run() {
+                                  hintText.animate().alpha(0f).setDuration(300).start();
+                              }
+                          }, 1000);
+                          return true;
+                      }
+                  });
+
+                  blackoutOverlayView.setOnTouchListener(new View.OnTouchListener() {
+                      @Override
+                      public boolean onTouch(View v, MotionEvent event) {
+                          return gestureDetector.onTouchEvent(event);
+                      }
+                  });
+
+                  windowManager.addView(blackoutOverlayView, overlayParams);
+              }
+
+              private void hideBlackoutOverlay() {
+                  if (!isBlackoutActive) return;
+                  isBlackoutActive = false;
+                  if (blackoutOverlayView != null) {
+                      windowManager.removeView(blackoutOverlayView);
+                      blackoutOverlayView = null;
+                  }
+              }
+
+              private void triggerVibrate() {
+                  Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+                  if (v != null) {
+                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                          v.vibrate(VibrationEffect.createOneShot(50, VibrationEffect.DEFAULT_AMPLITUDE));
+                      } else {
+                          v.vibrate(50);
+                      }
+                  }
+              }
+
+              @Override
+              public void onDestroy() {
+                  super.onDestroy();
+                  hideBlackoutOverlay();
+                  if (floatingBubbleView != null) {
+                      windowManager.removeView(floatingBubbleView);
+                      floatingBubbleView = null;
+                  }
+              }
+          }
+          EOF
+
+          # 2. Write BlackoutPlugin.java
+          cat << 'EOF' > android/app/src/main/java/com/blackoutscreen/app/BlackoutPlugin.java
+          package com.blackoutscreen.app;
+
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.provider.Settings;
+          import com.getcapacitor.JSObject;
+          import com.getcapacitor.Plugin;
+          import com.getcapacitor.PluginCall;
+          import com.getcapacitor.PluginMethod;
+          import com.getcapacitor.annotation.CapacitorPlugin;
+
+          @CapacitorPlugin(name = "BlackoutOverlay")
+          public class BlackoutPlugin extends Plugin {
+
+              @PluginMethod
+              public void checkPermission(PluginCall call) {
+                  boolean granted = true;
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      granted = Settings.canDrawOverlays(getContext());
+                  }
+                  JSObject ret = new JSObject();
+                  ret.put("granted", granted);
+                  call.resolve(ret);
+              }
+
+              @PluginMethod
+              public void requestPermission(PluginCall call) {
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                      if (!Settings.canDrawOverlays(getContext())) {
+                          Intent intent = new Intent(
+                              Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                              Uri.parse("package:" + getContext().getPackageName())
+                          );
+                          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          getContext().startActivity(intent);
+                      }
+                  }
+                  call.resolve();
+              }
+
+              @PluginMethod
+              public void startOverlayService(PluginCall call) {
+                  Intent intent = new Intent(getContext(), BlackoutFloatingService.class);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                      getContext().startForegroundService(intent);
+                  } else {
+                      getContext().startService(intent);
+                  }
+                  JSObject ret = new JSObject();
+                  ret.put("success", true);
+                  call.resolve(ret);
+              }
+
+              @PluginMethod
+              public void stopOverlayService(PluginCall call) {
+                  Intent intent = new Intent(getContext(), BlackoutFloatingService.class);
+                  getContext().stopService(intent);
+                  JSObject ret = new JSObject();
+                  ret.put("success", true);
+                  call.resolve(ret);
+              }
+          }
+          EOF
+
+          # 3. Update MainActivity.java to register BlackoutPlugin
           cat << 'EOF' > android/app/src/main/java/com/blackoutscreen/app/MainActivity.java
           package com.blackoutscreen.app;
 
@@ -58,18 +379,16 @@ jobs:
           public class MainActivity extends BridgeActivity {
               @Override
               public void onCreate(Bundle savedInstanceState) {
+                  registerPlugin(BlackoutPlugin.class);
                   super.onCreate(savedInstanceState);
 
-                  // Keep screen awake without sleeping
                   getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-                  // Allow drawing under camera notch & status bar
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                       getWindow().getAttributes().layoutInDisplayCutoutMode =
                           WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
                   }
 
-                  // Hardware Fullscreen & hide borders
                   getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
 
                   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -79,46 +398,18 @@ jobs:
                           controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
                           controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
                       }
-                  } else {
-                      getWindow().getDecorView().setSystemUiVisibility(
-                          View.SYSTEM_UI_FLAG_FULLSCREEN
-                          | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                          | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                          | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                          | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                          | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                      );
-                  }
-              }
-
-              @Override
-              public void onWindowFocusChanged(boolean hasFocus) {
-                  super.onWindowFocusChanged(hasFocus);
-                  if (hasFocus) {
-                      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                          WindowInsetsController controller = getWindow().getInsetsController();
-                          if (controller != null) {
-                              controller.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
-                              controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                          }
-                      } else {
-                          getWindow().getDecorView().setSystemUiVisibility(
-                              View.SYSTEM_UI_FLAG_FULLSCREEN
-                              | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                              | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                              | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                              | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                              | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                          );
-                      }
                   }
               }
           }
           EOF
 
-          # 2. Add SYSTEM_ALERT_WINDOW and WAKE_LOCK permissions to AndroidManifest
+          # 4. Add Permissions and Service to AndroidManifest.xml
           if ! grep -q "SYSTEM_ALERT_WINDOW" android/app/src/main/AndroidManifest.xml; then
-            sed -i '/<manifest/a \    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />' android/app/src/main/AndroidManifest.xml
+            sed -i '/<manifest/a \    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />\n    <uses-permission android:name="android.permission.WAKE_LOCK" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />\n    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />\n    <uses-permission android:name="android.permission.VIBRATE" />' android/app/src/main/AndroidManifest.xml
+          fi
+
+          if ! grep -q "BlackoutFloatingService" android/app/src/main/AndroidManifest.xml; then
+            sed -i '/<\/application>/i \        <service android:name=".BlackoutFloatingService" android:exported="false" android:foregroundServiceType="specialUse" />' android/app/src/main/AndroidManifest.xml
           fi
 
       - name: Accept Android SDK licenses
